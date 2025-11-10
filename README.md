@@ -71,8 +71,9 @@ Arpwatch is configured entirely through environment variables:
 |----------|----------|---------|-------------|
 | `ARPWATCH_INTERFACES` | Yes | - | Network interface to monitor (e.g., `eth0`). Only one interface per container. For multiple interfaces, run multiple containers. |
 | `ARPWATCH_NETWORK` | No | - | Network filter in CIDR notation (e.g., `192.168.1.0/24`) |
-| `ARPWATCH_OPTS` | No | - | Additional arpwatch command-line options (added after `-N -u arpwatch`) |
+| `ARPWATCH_OPTS` | No | - | Additional arpwatch command-line options (added after `-d` and optionally `-u arpwatch`) |
 | `ARPWATCH_DATA_DIR` | No | `/var/lib/arpwatch` | Data directory path |
+| `ARPWATCH_SKIP_PRIVILEGE_DROP` | No | `false` | Set to `true` to skip privilege dropping (required for Kubernetes with `allowPrivilegeEscalation: false`) |
 
 ### Examples
 
@@ -139,9 +140,10 @@ This image implements multiple security best practices:
 
 | Feature | Implementation |
 |---------|----------------|
-| **Privilege Dropping** | Container starts as root, arpwatch drops privileges to arpwatch user (UID 102) via `-u` flag after opening network sockets |
+| **Privilege Dropping** | Container starts as root, arpwatch drops privileges to arpwatch user (UID 102) via `-u` flag after opening network sockets (default mode) |
+| **Kubernetes Compatibility** | File capabilities allow running as non-root from start when `ARPWATCH_SKIP_PRIVILEGE_DROP=true` |
 | **Minimal Capabilities** | Only requires NET_RAW and NET_ADMIN capabilities |
-| **No Privilege Escalation** | `no-new-privileges:true` security option prevents further privilege escalation |
+| **No Privilege Escalation** | Compatible with Kubernetes `allowPrivilegeEscalation: false` security policy |
 | **Single Interface** | One container per interface reduces attack surface |
 | **Minimal Base** | Built on debian:trixie-slim for smaller attack surface |
 | **Resource Limits** | CPU and memory limits configured in docker-compose |
@@ -150,13 +152,28 @@ This image implements multiple security best practices:
 
 ### Security Model
 
-Arpwatch requires root privileges to open raw network sockets for packet capture. This image follows the recommended security pattern:
+This image supports two security models depending on your deployment environment:
+
+#### Default Mode (Docker/Docker Compose)
+
+Arpwatch requires root privileges to open raw network sockets for packet capture. The default mode follows this pattern:
 
 1. **Container starts as root** - Required to open raw sockets and bind to network interfaces
-2. **Arpwatch drops privileges** - After initialization, arpwatch switches to the non-privileged `arpwatch` user (UID 102)
+2. **Arpwatch drops privileges** - After initialization, arpwatch switches to the non-privileged `arpwatch` user (UID 102) via `-u` flag
 3. **Packet processing as non-root** - All packet capture and processing runs as the arpwatch user
 
 This approach provides the necessary privileges for initialization while minimizing the attack surface during normal operation.
+
+#### Kubernetes Mode (Restrictive Pod Security Standards)
+
+For environments with `allowPrivilegeEscalation: false`, use this alternative approach:
+
+1. **Container starts as arpwatch user** - Set `runAsUser: 102` in securityContext
+2. **File capabilities provide access** - The arpwatch binary has `cap_net_raw` and `cap_net_admin` file capabilities set via `setcap`
+3. **No privilege escalation** - Container runs as non-root throughout its lifecycle
+4. **Enable via environment variable** - Set `ARPWATCH_SKIP_PRIVILEGE_DROP=true` to skip the `-u` flag
+
+This mode is fully compatible with restrictive Kubernetes security policies while maintaining packet capture functionality.
 
 ## Version Information
 
@@ -179,6 +196,151 @@ For production use, deploy on:
 - Native Linux hosts
 - Linux VMs with direct network access
 - Kubernetes clusters on Linux nodes
+
+### Kubernetes Deployment
+
+#### Why Special Configuration is Needed
+
+Kubernetes environments often enforce restrictive Pod Security Standards, including `allowPrivilegeEscalation: false`. The default Docker behavior of starting as root and then dropping privileges via the `-u` flag triggers this restriction.
+
+This image solves this by using **file capabilities** (`setcap`) on the arpwatch binary, allowing it to open raw network sockets even when running as a non-root user from the start.
+
+#### Pod Example (Single Node Monitoring)
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: arpwatch
+  labels:
+    app: arpwatch
+spec:
+  hostNetwork: true  # Required to access host network interfaces
+  containers:
+  - name: arpwatch
+    image: cmooreio/arpwatch:latest
+    env:
+    - name: ARPWATCH_INTERFACES
+      value: "eth0"  # Change to your interface
+    - name: ARPWATCH_SKIP_PRIVILEGE_DROP
+      value: "true"  # Required for Kubernetes mode
+    securityContext:
+      runAsUser: 102  # Run as arpwatch user from the start
+      runAsGroup: 102
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false  # Complies with restrictive PSS
+      capabilities:
+        drop:
+        - ALL
+        add:
+        - NET_RAW   # Required for packet capture
+        - NET_ADMIN # Required for interface access
+    volumeMounts:
+    - name: arpwatch-data
+      mountPath: /var/lib/arpwatch
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "250m"
+      limits:
+        memory: "256Mi"
+        cpu: "1"
+  volumes:
+  - name: arpwatch-data
+    hostPath:
+      path: /var/lib/arpwatch
+      type: DirectoryOrCreate
+```
+
+#### DaemonSet Example (Cluster-Wide Monitoring)
+
+For monitoring all nodes in a cluster:
+
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: arpwatch
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: arpwatch
+  template:
+    metadata:
+      labels:
+        app: arpwatch
+    spec:
+      hostNetwork: true
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      containers:
+      - name: arpwatch
+        image: cmooreio/arpwatch:latest
+        env:
+        - name: ARPWATCH_INTERFACES
+          value: "eth0"
+        - name: ARPWATCH_SKIP_PRIVILEGE_DROP
+          value: "true"
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          runAsUser: 102
+          runAsGroup: 102
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_RAW
+            - NET_ADMIN
+        volumeMounts:
+        - name: arpwatch-data
+          mountPath: /var/lib/arpwatch
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "250m"
+          limits:
+            memory: "256Mi"
+            cpu: "1"
+      volumes:
+      - name: arpwatch-data
+        hostPath:
+          path: /var/lib/arpwatch
+          type: DirectoryOrCreate
+```
+
+#### Key Configuration Points for Kubernetes
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| `ARPWATCH_SKIP_PRIVILEGE_DROP` | `"true"` | Disables the `-u arpwatch` flag to avoid privilege escalation |
+| `runAsUser` | `102` | Runs container as arpwatch user from the start |
+| `runAsNonRoot` | `true` | Enforces non-root execution (optional but recommended) |
+| `allowPrivilegeEscalation` | `false` | Complies with restricted Pod Security Standards |
+| `capabilities.add` | `[NET_RAW, NET_ADMIN]` | Required for packet capture (enabled via file capabilities) |
+| `hostNetwork` | `true` | Mandatory to access host network interfaces |
+
+#### How File Capabilities Work
+
+The arpwatch binary in this image has file capabilities set:
+
+```bash
+# Inside the container
+getcap /usr/sbin/arpwatch
+# Output: /usr/sbin/arpwatch = cap_net_admin,cap_net_raw+ep
+```
+
+These capabilities allow the arpwatch process to:
+- Open raw network sockets (CAP_NET_RAW)
+- Access network interfaces (CAP_NET_ADMIN)
+
+Even when running as the non-root arpwatch user (UID 102), without requiring privilege escalation.
 
 ## Data Persistence
 
@@ -261,12 +423,75 @@ docker logs <container-name>
    # Should show: arpwatch:arpwatch
    ```
 
+### Kubernetes-specific issues
+
+#### Pod fails with "Operation not permitted"
+
+**Problem**: Pod logs show permission errors when trying to open network interfaces.
+
+**Solutions**:
+1. Verify `ARPWATCH_SKIP_PRIVILEGE_DROP=true` is set:
+   ```bash
+   kubectl get pod <pod-name> -o yaml | grep ARPWATCH_SKIP_PRIVILEGE_DROP
+   ```
+
+2. Ensure Pod is running as arpwatch user (UID 102):
+   ```bash
+   kubectl exec <pod-name> -- id
+   # Should show: uid=102(arpwatch) gid=102(arpwatch)
+   ```
+
+3. Verify capabilities are granted:
+   ```bash
+   kubectl get pod <pod-name> -o yaml | grep -A 5 capabilities
+   # Should show NET_RAW and NET_ADMIN in add: section
+   ```
+
+4. Check file capabilities are present:
+   ```bash
+   kubectl exec <pod-name> -- getcap /usr/sbin/arpwatch
+   # Should show: cap_net_admin,cap_net_raw+ep
+   ```
+
+#### Pod fails with privilege escalation error
+
+**Problem**: Pod admission fails with "allowPrivilegeEscalation: must be false".
+
+**Solution**: Ensure you're using Kubernetes mode configuration:
+- Set `ARPWATCH_SKIP_PRIVILEGE_DROP=true`
+- Set `runAsUser: 102` in securityContext
+- Set `allowPrivilegeEscalation: false` in securityContext
+
+**Verify configuration**:
+```bash
+kubectl get pod <pod-name> -o yaml | grep -A 3 securityContext
+```
+
+#### DaemonSet not scheduling on all nodes
+
+**Problem**: DaemonSet pods only run on some nodes.
+
+**Solutions**:
+1. Check node taints and add appropriate tolerations
+2. Verify nodes have the required capabilities support
+3. Check PodSecurityPolicy or Pod Security Standards admission
+
+```bash
+# Check node taints
+kubectl get nodes -o json | jq '.items[].spec.taints'
+
+# View DaemonSet events
+kubectl describe ds arpwatch -n monitoring
+```
+
 ### Logs-only design
 
 **Note**: This image is designed for logs-only operation and does not include email notification functionality. All ARP activity is logged to `/var/log/arpwatch` and can be monitored through:
+
 1. Docker logs: `docker logs <container>`
 2. Log aggregation services (ELK, Splunk, etc.)
 3. External monitoring tools that parse log files
+4. Kubernetes: `kubectl logs <pod-name>`
 
 ## For Developers
 

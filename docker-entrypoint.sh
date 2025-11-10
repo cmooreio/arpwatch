@@ -8,10 +8,10 @@ set -x
 # Handles configuration and startup of arpwatch service
 
 # Default values (ARPWATCH_INTERFACES has no default - must be set by user)
-# Note: We don't use -u flag since container already runs as arpwatch user
 ARPWATCH_INTERFACES="${ARPWATCH_INTERFACES:-}"
 ARPWATCH_OPTS="${ARPWATCH_OPTS:-}"
 ARPWATCH_DATA_DIR="${ARPWATCH_DATA_DIR:-/var/lib/arpwatch}"
+ARPWATCH_SKIP_PRIVILEGE_DROP="${ARPWATCH_SKIP_PRIVILEGE_DROP:-false}"
 
 # Color output for logging
 readonly RED='\033[0;31m'
@@ -86,7 +86,10 @@ build_arpwatch_args() {
 
     # Drop privileges to arpwatch user after opening network interface
     # This is required because we run as root to open raw sockets
-    args+=("-u" "arpwatch")
+    # In Kubernetes environments with allowPrivilegeEscalation: false, skip this via ARPWATCH_SKIP_PRIVILEGE_DROP=true
+    if [[ "${ARPWATCH_SKIP_PRIVILEGE_DROP}" != "true" ]]; then
+        args+=("-u" "arpwatch")
+    fi
 
     echo "${args[@]}"
 }
@@ -109,11 +112,23 @@ main() {
         exit 1
     fi
 
-    # Check if running as root (required for opening raw sockets)
-    if [[ "$(id -u)" != "0" ]]; then
-        log_error "Container must run as root to open raw sockets"
-        log_error "Arpwatch will drop privileges to arpwatch user via -u flag"
-        exit 1
+    # Check if running with appropriate user permissions
+    current_uid=$(id -u)
+    if [[ "${ARPWATCH_SKIP_PRIVILEGE_DROP}" == "true" ]]; then
+        # When skipping privilege drop (Kubernetes mode), container should run as arpwatch user from start
+        if [[ "$current_uid" != "102" ]]; then
+            log_error "When ARPWATCH_SKIP_PRIVILEGE_DROP=true, container must run as arpwatch user (UID 102)"
+            log_error "Use: docker run --user 102:102 or runAsUser: 102 in Kubernetes"
+            exit 1
+        fi
+    else
+        # Default mode: container must run as root to drop privileges after opening raw sockets
+        if [[ "$current_uid" != "0" ]]; then
+            log_error "Container must run as root to open raw sockets and drop privileges"
+            log_error "Arpwatch will drop privileges to arpwatch user (UID 102) via -u flag"
+            log_error "For Kubernetes with allowPrivilegeEscalation: false, set ARPWATCH_SKIP_PRIVILEGE_DROP=true"
+            exit 1
+        fi
     fi
 
     # Build command arguments

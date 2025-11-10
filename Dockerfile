@@ -10,10 +10,10 @@ ARG VCS_REF
 # These can be overridden at runtime via docker run -e or docker-compose
 # Note: ARPWATCH_INTERFACES must be set at runtime (no default)
 # This image is designed for logs-only (no email functionality)
-# Note: -u flag is not needed as we already run as arpwatch user
 ENV ARPWATCH_OPTS="" \
     ARPWATCH_NETWORK="" \
-    ARPWATCH_DATA_DIR="/var/lib/arpwatch"
+    ARPWATCH_DATA_DIR="/var/lib/arpwatch" \
+    ARPWATCH_SKIP_PRIVILEGE_DROP="false"
 
 # OCI Labels
 LABEL org.opencontainers.image.title="arpwatch" \
@@ -40,6 +40,7 @@ RUN set -eux; \
         ca-certificates \
         iproute2 \
         procps \
+        libcap2-bin \
     && \
     # Debian package creates arpwatch user (UID 100), modify to UID 102 for consistency
     # First remove the user created by the package
@@ -49,11 +50,16 @@ RUN set -eux; \
     groupadd -r -g 102 arpwatch && \
     useradd -r -u 102 -g arpwatch -s /sbin/nologin -d /var/lib/arpwatch -c "Arpwatch User" arpwatch && \
     # Create required directories with proper permissions
-    # Container runs as root, so directories are owned by root
-    # Arpwatch process drops privileges to arpwatch user via -u flag
+    # Directories owned by arpwatch user for both modes:
+    # - Default: Container runs as root, arpwatch drops to arpwatch user via -u flag
+    # - Kubernetes: Container runs as arpwatch user from start (ARPWATCH_SKIP_PRIVILEGE_DROP=true)
     mkdir -p /var/lib/arpwatch /var/log/arpwatch && \
-    chown -R root:root /var/lib/arpwatch /var/log/arpwatch && \
+    chown -R arpwatch:arpwatch /var/lib/arpwatch /var/log/arpwatch && \
     chmod 755 /var/lib/arpwatch /var/log/arpwatch && \
+    # Set file capabilities on arpwatch binary for Kubernetes mode
+    # This allows arpwatch to open raw sockets when running as non-root (UID 102)
+    # Required for ARPWATCH_SKIP_PRIVILEGE_DROP=true mode
+    setcap cap_net_raw,cap_net_admin=+ep /usr/sbin/arpwatch && \
     # Clean up apt cache to reduce image size
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
