@@ -41,12 +41,12 @@ build_arpwatch_args() {
         iface=$(echo "$iface" | xargs)  # Trim whitespace
         if [[ -n "$iface" ]]; then
             args+=("-i" "$iface")
-            log_info "Monitoring interface: $iface"
+            log_info "Monitoring interface: $iface" >&2
 
             # Create data file for this interface if it doesn't exist
             local datafile="${ARPWATCH_DATA_DIR}/${iface}.dat"
             if [[ ! -f "$datafile" ]]; then
-                touch "$datafile" 2>/dev/null || log_warn "Cannot create $datafile"
+                touch "$datafile" 2>/dev/null || log_warn "Cannot create $datafile" >&2
             fi
         fi
     done
@@ -54,7 +54,7 @@ build_arpwatch_args() {
     # Add network filter if specified
     if [[ -n "$ARPWATCH_NETWORK" ]]; then
         args+=("-n" "$ARPWATCH_NETWORK")
-        log_info "Network filter: $ARPWATCH_NETWORK"
+        log_info "Network filter: $ARPWATCH_NETWORK" >&2
     fi
 
     # Add additional options
@@ -64,8 +64,8 @@ build_arpwatch_args() {
         args+=("${OPTS[@]}")
     fi
 
-    # Don't daemonize in container (run in foreground)
-    args+=("-d")
+    # Run in foreground (don't daemonize)
+    args+=("-N")
 
     echo "${args[@]}"
 }
