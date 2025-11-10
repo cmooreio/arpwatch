@@ -201,9 +201,11 @@ For production use, deploy on:
 
 #### Why Special Configuration is Needed
 
-Kubernetes environments often enforce restrictive Pod Security Standards, including `allowPrivilegeEscalation: false`. The default Docker behavior of starting as root and then dropping privileges via the `-u` flag triggers this restriction.
+Kubernetes environments often enforce restrictive Pod Security Standards, including `allowPrivilegeEscalation: false`. The default Docker behavior of starting as root and then dropping privileges via the `-u` flag is blocked by this restriction.
 
-This image solves this by using **file capabilities** (`setcap`) on the arpwatch binary, allowing it to open raw network sockets even when running as a non-root user from the start.
+**Solution**: Skip the privilege drop by setting `ARPWATCH_SKIP_PRIVILEGE_DROP=true`. The container runs as root throughout, but with only NET_RAW and NET_ADMIN capabilities. This is the recommended approach for Kubernetes environments where the `-u` flag cannot be used.
+
+**Note**: While this image includes file capabilities on the arpwatch binary, in practice most Kubernetes configurations require running as root due to capability restrictions and security context limitations.
 
 #### Pod Example (Single Node Monitoring)
 
@@ -225,9 +227,8 @@ spec:
     - name: ARPWATCH_SKIP_PRIVILEGE_DROP
       value: "true"  # Required for Kubernetes mode
     securityContext:
-      runAsUser: 102  # Run as arpwatch user from the start
-      runAsGroup: 102
-      runAsNonRoot: true
+      # Run as root - required for opening raw sockets in Kubernetes
+      # Security is maintained through limited capabilities (only NET_RAW and NET_ADMIN)
       allowPrivilegeEscalation: false  # Complies with restrictive PSS
       capabilities:
         drop:
@@ -288,9 +289,8 @@ spec:
             fieldRef:
               fieldPath: spec.nodeName
         securityContext:
-          runAsUser: 102
-          runAsGroup: 102
-          runAsNonRoot: true
+          # Run as root - required for opening raw sockets in Kubernetes
+          # Security is maintained through limited capabilities
           allowPrivilegeEscalation: false
           capabilities:
             drop:
@@ -319,16 +319,18 @@ spec:
 
 | Setting | Value | Purpose |
 |---------|-------|---------|
-| `ARPWATCH_SKIP_PRIVILEGE_DROP` | `"true"` | Disables the `-u arpwatch` flag to avoid privilege escalation |
-| `runAsUser` | `102` | Runs container as arpwatch user from the start |
-| `runAsNonRoot` | `true` | Enforces non-root execution (optional but recommended) |
+| `ARPWATCH_SKIP_PRIVILEGE_DROP` | `"true"` | Disables the `-u arpwatch` flag to avoid privilege escalation restriction |
+| `securityContext` | (no runAsUser) | Container runs as root (UID 0) - required for opening raw sockets |
 | `allowPrivilegeEscalation` | `false` | Complies with restricted Pod Security Standards |
-| `capabilities.add` | `[NET_RAW, NET_ADMIN]` | Required for packet capture (enabled via file capabilities) |
+| `capabilities.drop` | `[ALL]` | Drop all default capabilities |
+| `capabilities.add` | `[NET_RAW, NET_ADMIN]` | Add only required capabilities for packet capture |
 | `hostNetwork` | `true` | Mandatory to access host network interfaces |
 
-#### How File Capabilities Work
+**Security Note**: While running as root, the container is restricted to only NET_RAW and NET_ADMIN capabilities. All other capabilities are dropped, maintaining a secure posture despite root execution.
 
-The arpwatch binary in this image has file capabilities set:
+#### About File Capabilities
+
+This image includes file capabilities on the arpwatch binary as a secondary option:
 
 ```bash
 # Inside the container
@@ -336,11 +338,13 @@ getcap /usr/sbin/arpwatch
 # Output: /usr/sbin/arpwatch = cap_net_admin,cap_net_raw+ep
 ```
 
-These capabilities allow the arpwatch process to:
-- Open raw network sockets (CAP_NET_RAW)
-- Access network interfaces (CAP_NET_ADMIN)
+**However**, in practice most Kubernetes configurations work best by running as root with dropped capabilities. File capabilities can be restricted by:
+- SELinux policies
+- AppArmor profiles
+- Pod Security Policies
+- Specific container runtime limitations
 
-Even when running as the non-root arpwatch user (UID 102), without requiring privilege escalation.
+**Recommended**: Use the root-based approach shown in the examples above. If you want to experiment with file capabilities and running as UID 102, you can try omitting `runAsUser` entirely or setting it to 102, but this is not the primary supported configuration.
 
 ## Data Persistence
 
@@ -435,10 +439,10 @@ docker logs <container-name>
    kubectl get pod <pod-name> -o yaml | grep ARPWATCH_SKIP_PRIVILEGE_DROP
    ```
 
-2. Ensure Pod is running as arpwatch user (UID 102):
+2. Ensure Pod is running as root (for Kubernetes mode):
    ```bash
    kubectl exec <pod-name> -- id
-   # Should show: uid=102(arpwatch) gid=102(arpwatch)
+   # Should show: uid=0(root) gid=0(root)
    ```
 
 3. Verify capabilities are granted:
@@ -447,10 +451,10 @@ docker logs <container-name>
    # Should show NET_RAW and NET_ADMIN in add: section
    ```
 
-4. Check file capabilities are present:
+4. Check that allowPrivilegeEscalation is false:
    ```bash
-   kubectl exec <pod-name> -- getcap /usr/sbin/arpwatch
-   # Should show: cap_net_admin,cap_net_raw+ep
+   kubectl get pod <pod-name> -o yaml | grep allowPrivilegeEscalation
+   # Should show: allowPrivilegeEscalation: false
    ```
 
 #### Pod fails with privilege escalation error
@@ -458,13 +462,14 @@ docker logs <container-name>
 **Problem**: Pod admission fails with "allowPrivilegeEscalation: must be false".
 
 **Solution**: Ensure you're using Kubernetes mode configuration:
-- Set `ARPWATCH_SKIP_PRIVILEGE_DROP=true`
-- Set `runAsUser: 102` in securityContext
+- Set `ARPWATCH_SKIP_PRIVILEGE_DROP=true` (disables the `-u` flag)
+- DO NOT set `runAsUser` in securityContext (run as root)
 - Set `allowPrivilegeEscalation: false` in securityContext
+- Set `capabilities.drop: [ALL]` and `capabilities.add: [NET_RAW, NET_ADMIN]`
 
 **Verify configuration**:
 ```bash
-kubectl get pod <pod-name> -o yaml | grep -A 3 securityContext
+kubectl get pod <pod-name> -o yaml | grep -A 10 securityContext
 ```
 
 #### DaemonSet not scheduling on all nodes

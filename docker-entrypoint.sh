@@ -115,10 +115,16 @@ main() {
     # Check if running with appropriate user permissions
     current_uid=$(id -u)
     if [[ "${ARPWATCH_SKIP_PRIVILEGE_DROP}" == "true" ]]; then
-        # When skipping privilege drop (Kubernetes mode), container should run as arpwatch user from start
-        if [[ "$current_uid" != "102" ]]; then
-            log_error "When ARPWATCH_SKIP_PRIVILEGE_DROP=true, container must run as arpwatch user (UID 102)"
-            log_error "Use: docker run --user 102:102 or runAsUser: 102 in Kubernetes"
+        # When skipping privilege drop (Kubernetes mode)
+        # Allow running as either root or arpwatch user
+        if [[ "$current_uid" == "102" ]]; then
+            log_info "Running as arpwatch user (UID 102) with file capabilities"
+        elif [[ "$current_uid" == "0" ]]; then
+            log_warn "Running as root (UID 0) without privilege dropping"
+            log_warn "This is acceptable for Kubernetes environments where file capabilities don't work"
+        else
+            log_error "When ARPWATCH_SKIP_PRIVILEGE_DROP=true, container must run as either root (0) or arpwatch (102)"
+            log_error "Current UID: $current_uid"
             exit 1
         fi
     else
