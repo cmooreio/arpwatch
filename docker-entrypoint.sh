@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Enable command tracing for debugging
+set -x
+
 # Arpwatch Docker Entrypoint Script
 # Handles configuration and startup of arpwatch service
 
@@ -120,9 +123,13 @@ main() {
     # Log the full command
     log_info "Executing: arpwatch ${arpwatch_args[*]}"
 
-    # Execute arpwatch in background
+    # Create temporary file to capture stderr
+    STDERR_LOG=$(mktemp)
+
+    # Execute arpwatch in background with merged stdout/stderr
+    # Capture stderr separately for error reporting while also allowing output to show
     # shellcheck disable=SC2068
-    arpwatch ${arpwatch_args[@]} &
+    arpwatch ${arpwatch_args[@]} 2>&1 | tee -a "$STDERR_LOG" &
     ARPWATCH_PID=$!
 
     # Wait a moment for arpwatch to initialize
@@ -131,8 +138,30 @@ main() {
     # Check if arpwatch process is running
     if ! pgrep -u arpwatch arpwatch >/dev/null 2>&1; then
         log_error "Arpwatch failed to start"
+        log_error ""
+
+        # Display captured stderr if available
+        if [ -s "$STDERR_LOG" ]; then
+            log_error "Arpwatch output:"
+            while IFS= read -r line; do
+                log_error "  $line"
+            done < "$STDERR_LOG"
+            log_error ""
+        fi
+
+        log_error "Common causes:"
+        log_error "  - Invalid interface name (check: ip link show)"
+        log_error "  - Missing required capabilities (NET_RAW, NET_ADMIN)"
+        log_error "  - Network mode not set to 'host'"
+        log_error "  - Permission issues with data directory"
+        log_error "  - Running on Docker Desktop (limited packet capture support)"
+
+        rm -f "$STDERR_LOG"
         exit 1
     fi
+
+    # Clean up stderr log
+    rm -f "$STDERR_LOG"
 
     log_info "Arpwatch started successfully"
 

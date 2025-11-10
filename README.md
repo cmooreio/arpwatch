@@ -23,7 +23,6 @@ Security-hardened arpwatch network monitoring tool running on Debian Trixie.
 docker run -d \
   --name arpwatch \
   --net=host \
-  --cap-drop=ALL \
   --cap-add=NET_RAW \
   --cap-add=NET_ADMIN \
   -e ARPWATCH_INTERFACES="eth0" \
@@ -34,27 +33,18 @@ docker run -d \
 ### Using Docker Compose
 
 ```yaml
-version: '3.8'
-
 services:
   arpwatch:
     image: cmooreio/arpwatch:latest
     container_name: arpwatch
     network_mode: host
-    read_only: true
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
     cap_add:
       - NET_RAW
       - NET_ADMIN
     environment:
       ARPWATCH_INTERFACES: "eth0"
-    tmpfs:
-      - /tmp:uid=102,gid=102,mode=1777
-      - /var/tmp:uid=102,gid=102,mode=1777
-      - /run:uid=102,gid=102,mode=755
     volumes:
       - arpwatch-data:/var/lib/arpwatch:rw
       - arpwatch-logs:/var/log/arpwatch:rw
@@ -79,9 +69,9 @@ Arpwatch is configured entirely through environment variables:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ARPWATCH_INTERFACES` | Yes | - | Comma-separated list of interfaces to monitor (e.g., `eth0` or `eth0,eth1,wlan0`) |
+| `ARPWATCH_INTERFACES` | Yes | - | Network interface to monitor (e.g., `eth0`). Only one interface per container. For multiple interfaces, run multiple containers. |
 | `ARPWATCH_NETWORK` | No | - | Network filter in CIDR notation (e.g., `192.168.1.0/24`) |
-| `ARPWATCH_OPTS` | No | `-u arpwatch -p` | Additional arpwatch command-line options |
+| `ARPWATCH_OPTS` | No | - | Additional arpwatch command-line options (added after `-N -u arpwatch`) |
 | `ARPWATCH_DATA_DIR` | No | `/var/lib/arpwatch` | Data directory path |
 
 ### Examples
@@ -97,15 +87,34 @@ docker run -d \
   cmooreio/arpwatch:latest
 ```
 
-#### Multiple Interfaces with Network Filtering
+#### Single Interface with Network Filtering
 
 ```bash
 docker run -d \
   --net=host \
   --cap-add=NET_RAW \
   --cap-add=NET_ADMIN \
-  -e ARPWATCH_INTERFACES="eth0,eth1,wlan0" \
+  -e ARPWATCH_INTERFACES="eth0" \
   -e ARPWATCH_NETWORK="192.168.0.0/16" \
+  -v arpwatch-data:/var/lib/arpwatch \
+  cmooreio/arpwatch:latest
+```
+
+**Note**: Arpwatch supports one interface per instance. For multiple interfaces, run separate containers:
+
+```bash
+# Container for eth0
+docker run -d --name arpwatch-eth0 --net=host \
+  --cap-add=NET_RAW --cap-add=NET_ADMIN \
+  -e ARPWATCH_INTERFACES="eth0" \
+  -v arpwatch-eth0:/var/lib/arpwatch \
+  cmooreio/arpwatch:latest
+
+# Container for eth1
+docker run -d --name arpwatch-eth1 --net=host \
+  --cap-add=NET_RAW --cap-add=NET_ADMIN \
+  -e ARPWATCH_INTERFACES="eth1" \
+  -v arpwatch-eth1:/var/lib/arpwatch \
   cmooreio/arpwatch:latest
 ```
 
@@ -115,14 +124,9 @@ docker run -d \
 docker run -d \
   --name arpwatch \
   --net=host \
-  --read-only \
-  --cap-drop=ALL \
   --cap-add=NET_RAW \
   --cap-add=NET_ADMIN \
   --security-opt=no-new-privileges:true \
-  --tmpfs /tmp:uid=102,gid=102,mode=1777 \
-  --tmpfs /var/tmp:uid=102,gid=102,mode=1777 \
-  --tmpfs /run:uid=102,gid=102,mode=755 \
   -v arpwatch-data:/var/lib/arpwatch:rw \
   -v arpwatch-logs:/var/log/arpwatch:rw \
   -e ARPWATCH_INTERFACES="eth0" \
@@ -135,14 +139,24 @@ This image implements multiple security best practices:
 
 | Feature | Implementation |
 |---------|----------------|
-| **Non-Root User** | Runs as arpwatch user (UID 102, GID 102) |
-| **Read-Only Filesystem** | Fully compatible with `--read-only` flag |
-| **Capability Reduction** | Only requires NET_RAW and NET_ADMIN |
-| **No Privilege Escalation** | `no-new-privileges:true` security option |
-| **Minimal Base** | Built on debian:trixie-slim |
-| **Resource Limits** | CPU and memory limits configured |
-| **Health Check** | Built-in health monitoring |
-| **SBOM & Provenance** | Software Bill of Materials and build attestations |
+| **Privilege Dropping** | Container starts as root, arpwatch drops privileges to arpwatch user (UID 102) via `-u` flag after opening network sockets |
+| **Minimal Capabilities** | Only requires NET_RAW and NET_ADMIN capabilities |
+| **No Privilege Escalation** | `no-new-privileges:true` security option prevents further privilege escalation |
+| **Single Interface** | One container per interface reduces attack surface |
+| **Minimal Base** | Built on debian:trixie-slim for smaller attack surface |
+| **Resource Limits** | CPU and memory limits configured in docker-compose |
+| **Health Check** | Built-in monitoring verifies arpwatch process is running |
+| **SBOM & Provenance** | Software Bill of Materials and build attestations included |
+
+### Security Model
+
+Arpwatch requires root privileges to open raw network sockets for packet capture. This image follows the recommended security pattern:
+
+1. **Container starts as root** - Required to open raw sockets and bind to network interfaces
+2. **Arpwatch drops privileges** - After initialization, arpwatch switches to the non-privileged `arpwatch` user (UID 102)
+3. **Packet processing as non-root** - All packet capture and processing runs as the arpwatch user
+
+This approach provides the necessary privileges for initialization while minimizing the attack surface during normal operation.
 
 ## Version Information
 
@@ -174,10 +188,11 @@ Arpwatch stores its ARP database in `/var/lib/arpwatch`. To persist data across 
 -v arpwatch-data:/var/lib/arpwatch:rw
 ```
 
-Each monitored interface gets its own data file:
-- `/var/lib/arpwatch/eth0.dat`
-- `/var/lib/arpwatch/eth1.dat`
-- etc.
+Each container monitors one interface and stores its data in `/var/lib/arpwatch/<interface>.dat`. For example:
+- Container monitoring `eth0` creates `/var/lib/arpwatch/eth0.dat`
+- Container monitoring `eth1` creates `/var/lib/arpwatch/eth1.dat`
+
+When running multiple containers, use separate volumes for each interface to avoid conflicts.
 
 ## Logs
 
