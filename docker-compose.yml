@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  arpwatch:
+    image: cmooreio/arpwatch:latest
+    container_name: arpwatch
+    hostname: arpwatch
+
+    # Network configuration
+    # Use host network mode to access network interfaces
+    network_mode: host
+
+    # Security hardening
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW        # Required for packet capture
+      - NET_ADMIN      # Required for interface access
+
+    # Environment variables for arpwatch configuration
+    environment:
+      # REQUIRED: Comma-separated list of interfaces to monitor
+      ARPWATCH_INTERFACES: "eth0"
+
+      # OPTIONAL: Network filter (CIDR notation)
+      # ARPWATCH_NETWORK: "192.168.1.0/24"
+
+      # OPTIONAL: Additional arpwatch options
+      # ARPWATCH_OPTS: "-u arpwatch -p"
+
+    # Writable tmpfs mounts for arpwatch user (UID/GID 102)
+    tmpfs:
+      - /tmp:uid=102,gid=102,mode=1777
+      - /var/tmp:uid=102,gid=102,mode=1777
+      - /run:uid=102,gid=102,mode=755
+
+    # Persistent volumes for arpwatch data
+    volumes:
+      # Store ARP database persistently
+      - arpwatch-data:/var/lib/arpwatch:rw
+      # Store logs persistently
+      - arpwatch-logs:/var/log/arpwatch:rw
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Named volumes for persistent data
+volumes:
+  arpwatch-data:
+    driver: local
+  arpwatch-logs:
+    driver: local
+
+# Example configurations for different scenarios
+# Uncomment and modify as needed
+
+# ==============================================================================
+# Example 1: Monitor multiple interfaces with network filtering
+# ==============================================================================
+#   arpwatch-multi:
+#     image: cmooreio/arpwatch:latest
+#     container_name: arpwatch-multi
+#     network_mode: host
+#     read_only: true
+#     security_opt:
+#       - no-new-privileges:true
+#     cap_drop:
+#       - ALL
+#     cap_add:
+#       - NET_RAW
+#       - NET_ADMIN
+#     environment:
+#       ARPWATCH_INTERFACES: "eth0,eth1,wlan0"
+#       ARPWATCH_NETWORK: "192.168.0.0/16"
+#     tmpfs:
+#       - /tmp:uid=102,gid=102,mode=1777
+#       - /var/tmp:uid=102,gid=102,mode=1777
+#       - /run:uid=102,gid=102,mode=755
+#     volumes:
+#       - arpwatch-data:/var/lib/arpwatch:rw
+#       - arpwatch-logs:/var/log/arpwatch:rw
+#     restart: unless-stopped
+
+# ==============================================================================
+# Example 2: Development/testing with specific network
+# ==============================================================================
+#   arpwatch-dev:
+#     image: cmooreio/arpwatch:latest
+#     container_name: arpwatch-dev
+#     network_mode: host
+#     read_only: true
+#     security_opt:
+#       - no-new-privileges:true
+#     cap_drop:
+#       - ALL
+#     cap_add:
+#       - NET_RAW
+#       - NET_ADMIN
+#     environment:
+#       ARPWATCH_INTERFACES: "eth0"
+#       ARPWATCH_NETWORK: "10.0.0.0/8"
+#       DEBUG: "true"
+#     tmpfs:
+#       - /tmp:uid=102,gid=102,mode=1777
+#       - /var/tmp:uid=102,gid=102,mode=1777
+#       - /run:uid=102,gid=102,mode=755
+#     volumes:
+#       - ./dev-data:/var/lib/arpwatch:rw
+#       - ./dev-logs:/var/log/arpwatch:rw
+#     restart: "no"

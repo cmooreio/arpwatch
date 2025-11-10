@@ -1,0 +1,134 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "description": "Arpwatch Docker Image - Renovate Configuration",
+  "timezone": "America/New_York",
+  "schedule": [
+    "before 5am on Monday"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "semanticCommits": "enabled",
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": [
+      "security"
+    ]
+  },
+  "osvVulnerabilityAlerts": true,
+  "dependencyDashboard": true,
+  "assignees": [],
+  "reviewers": [],
+  "packageRules": [
+    {
+      "description": "Debian base image updates",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "debian"
+      ],
+      "schedule": [
+        "before 5am on Monday"
+      ],
+      "labels": [
+        "docker",
+        "base-image"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Pre-commit hook updates",
+      "matchManagers": [
+        "pre-commit"
+      ],
+      "schedule": [
+        "before 5am on Monday"
+      ],
+      "labels": [
+        "pre-commit"
+      ],
+      "automerge": false,
+      "groupName": "pre-commit hooks"
+    },
+    {
+      "description": "GitHub Actions updates",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "schedule": [
+        "before 5am on Monday"
+      ],
+      "labels": [
+        "github-actions"
+      ],
+      "automerge": false,
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Arpwatch version updates (manual review required)",
+      "matchFiles": [
+        "versions.env"
+      ],
+      "matchPackagePatterns": [
+        "arpwatch"
+      ],
+      "labels": [
+        "arpwatch",
+        "manual-review"
+      ],
+      "automerge": false,
+      "schedule": [
+        "before 5am on Monday"
+      ]
+    },
+    {
+      "description": "Security updates - high priority",
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "matchCategories": [
+        "security"
+      ],
+      "labels": [
+        "security",
+        "priority"
+      ],
+      "automerge": false,
+      "schedule": [
+        "at any time"
+      ]
+    }
+  ],
+  "regexManagers": [
+    {
+      "description": "Update Debian version in versions.env",
+      "fileMatch": [
+        "^versions\\.env$"
+      ],
+      "matchStrings": [
+        "DEBIAN_VERSION=(?<currentValue>.*?)\\n"
+      ],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "debian",
+      "versioningTemplate": "loose"
+    },
+    {
+      "description": "Update arpwatch version in versions.env",
+      "fileMatch": [
+        "^versions\\.env$"
+      ],
+      "matchStrings": [
+        "VERSION=(?<currentValue>.*?)\\n"
+      ],
+      "datasourceTemplate": "repology",
+      "depNameTemplate": "arpwatch",
+      "versioningTemplate": "loose"
+    }
+  ]
+}

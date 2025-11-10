@@ -1,0 +1,83 @@
+# Arpwatch Docker Image - Docker Ignore Rules
+# Files and directories to exclude from Docker build context
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+CLAUDE.md
+*.md
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Build artifacts
+sbom-*.json
+*.tar
+*.tar.gz
+
+# Signing keys
+*.key
+*.pub
+cosign.key
+cosign.pub
+
+# Docker files
+docker-compose*.yml
+.dockerignore
+
+# Tests
+tests/
+*.test
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.*
+*.secret
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Build scripts (except entrypoint)
+build.sh
+Makefile
+
+# Configuration
+.editorconfig
+.pre-commit-config.yaml
+renovate.json
+
+# Backup files
+*.bak
+*.backup
+
+# Data directories
+arpwatch-data/
+arpwatch-logs/
