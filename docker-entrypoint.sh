@@ -157,7 +157,20 @@ main() {
     sleep 2
 
     # Check if arpwatch process is running
-    if ! pgrep -u arpwatch arpwatch >/dev/null 2>&1; then
+    # When skipping privilege drop, check for any arpwatch process (may run as root or arpwatch user)
+    # Otherwise, check specifically for arpwatch running as arpwatch user
+    local process_check_failed=false
+    if [[ "${ARPWATCH_SKIP_PRIVILEGE_DROP}" == "true" ]]; then
+        if ! pgrep arpwatch >/dev/null 2>&1; then
+            process_check_failed=true
+        fi
+    else
+        if ! pgrep -u arpwatch arpwatch >/dev/null 2>&1; then
+            process_check_failed=true
+        fi
+    fi
+
+    if [[ "$process_check_failed" == "true" ]]; then
         log_error "Arpwatch failed to start"
         log_error ""
 
@@ -187,10 +200,17 @@ main() {
     log_info "Arpwatch started successfully"
 
     # Keep container alive by waiting for arpwatch
-    # Note: arpwatch may fork, so we wait for any arpwatch process
-    while pgrep -u arpwatch arpwatch >/dev/null 2>&1; do
-        sleep 10
-    done
+    # When skipping privilege drop, check for any arpwatch process (may run as root)
+    # Otherwise, check specifically for arpwatch running as arpwatch user
+    if [[ "${ARPWATCH_SKIP_PRIVILEGE_DROP}" == "true" ]]; then
+        while pgrep arpwatch >/dev/null 2>&1; do
+            sleep 10
+        done
+    else
+        while pgrep -u arpwatch arpwatch >/dev/null 2>&1; do
+            sleep 10
+        done
+    fi
 
     log_warn "Arpwatch process exited"
     exit 1

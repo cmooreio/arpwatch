@@ -462,12 +462,14 @@ docker logs <container-name>
 **Problem**: Pod admission fails with "allowPrivilegeEscalation: must be false".
 
 **Solution**: Ensure you're using Kubernetes mode configuration:
+
 - Set `ARPWATCH_SKIP_PRIVILEGE_DROP=true` (disables the `-u` flag)
 - DO NOT set `runAsUser` in securityContext (run as root)
 - Set `allowPrivilegeEscalation: false` in securityContext
 - Set `capabilities.drop: [ALL]` and `capabilities.add: [NET_RAW, NET_ADMIN]`
 
 **Verify configuration**:
+
 ```bash
 kubectl get pod <pod-name> -o yaml | grep -A 10 securityContext
 ```
@@ -477,6 +479,7 @@ kubectl get pod <pod-name> -o yaml | grep -A 10 securityContext
 **Problem**: DaemonSet pods only run on some nodes.
 
 **Solutions**:
+
 1. Check node taints and add appropriate tolerations
 2. Verify nodes have the required capabilities support
 3. Check PodSecurityPolicy or Pod Security Standards admission
@@ -508,7 +511,7 @@ kubectl describe ds arpwatch -n monitoring
 - (Optional) trivy or grype for security scanning
 - (Optional) cosign for image signing
 
-### Quick Start
+### Building from Source
 
 ```bash
 # Clone repository
