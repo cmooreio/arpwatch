@@ -36,21 +36,33 @@ trap 'log_info "Received SIGINT, shutting down..."; exit 0' INT
 build_arpwatch_args() {
     local -a args=()
 
-    # Add interface-specific arguments
-    IFS=',' read -ra INTERFACES <<< "$ARPWATCH_INTERFACES"
-    for iface in "${INTERFACES[@]}"; do
-        iface=$(echo "$iface" | xargs)  # Trim whitespace
-        if [[ -n "$iface" ]]; then
-            args+=("-i" "$iface")
-            log_info "Monitoring interface: $iface" >&2
+    # Add interface argument
+    # Note: arpwatch only supports one interface per instance
+    # For multiple interfaces, run multiple containers
+    local iface
+    iface=$(echo "$ARPWATCH_INTERFACES" | xargs)  # Trim whitespace
 
-            # Create data file for this interface if it doesn't exist
-            local datafile="${ARPWATCH_DATA_DIR}/${iface}.dat"
-            if [[ ! -f "$datafile" ]]; then
-                touch "$datafile" 2>/dev/null || log_warn "Cannot create $datafile" >&2
-            fi
+    if [[ -n "$iface" ]]; then
+        # Warn if multiple interfaces specified
+        if [[ "$iface" == *","* ]]; then
+            log_warn "Multiple interfaces specified: $iface" >&2
+            log_warn "Arpwatch only supports one interface per instance" >&2
+            log_warn "Using first interface only. Run separate containers for each interface." >&2
+            iface=$(echo "$iface" | cut -d',' -f1 | xargs)
         fi
-    done
+
+        args+=("-i" "$iface")
+        log_info "Monitoring interface: $iface" >&2
+
+        # Create data file for this interface if it doesn't exist
+        local datafile="${ARPWATCH_DATA_DIR}/${iface}.dat"
+        if [[ ! -f "$datafile" ]]; then
+            touch "$datafile" 2>/dev/null || log_warn "Cannot create $datafile" >&2
+        fi
+
+        # Explicitly specify data file
+        args+=("-f" "$datafile")
+    fi
 
     # Add network filter if specified
     if [[ -n "$ARPWATCH_NETWORK" ]]; then
@@ -65,9 +77,13 @@ build_arpwatch_args() {
         args+=("${OPTS[@]}")
     fi
 
-    # Run in foreground with debug output
-    # -d enables debug mode, -N prevents daemonization
-    args+=("-d" "-N")
+    # Run in foreground without daemonizing
+    # -N prevents daemonization (required for containers)
+    args+=("-N")
+
+    # Drop privileges to arpwatch user after opening network interface
+    # This is required because we run as root to open raw sockets
+    args+=("-u" "arpwatch")
 
     echo "${args[@]}"
 }
@@ -90,9 +106,11 @@ main() {
         exit 1
     fi
 
-    # Check if running as arpwatch user
-    if [[ "$(id -u)" != "102" ]]; then
-        log_warn "Not running as arpwatch user (UID 102)"
+    # Check if running as root (required for opening raw sockets)
+    if [[ "$(id -u)" != "0" ]]; then
+        log_error "Container must run as root to open raw sockets"
+        log_error "Arpwatch will drop privileges to arpwatch user via -u flag"
+        exit 1
     fi
 
     # Build command arguments
@@ -102,32 +120,30 @@ main() {
     # Log the full command
     log_info "Executing: arpwatch ${arpwatch_args[*]}"
 
-    # Execute arpwatch with proper error handling
+    # Execute arpwatch in background
     # shellcheck disable=SC2068
     arpwatch ${arpwatch_args[@]} &
     ARPWATCH_PID=$!
 
-    # Wait for arpwatch to initialize
-    sleep 1
+    # Wait a moment for arpwatch to initialize
+    sleep 2
 
-    # Check if arpwatch is still running
-    if ! kill -0 $ARPWATCH_PID 2>/dev/null; then
-        log_error "Arpwatch failed to start or exited immediately"
-        log_error "This may be due to:"
-        log_error "  - Invalid interface name"
-        log_error "  - Missing required capabilities (NET_RAW, NET_ADMIN)"
-        log_error "  - Network mode not set to 'host'"
-        log_error "  - Running on Docker Desktop (limited packet capture support)"
+    # Check if arpwatch process is running
+    if ! pgrep -u arpwatch arpwatch >/dev/null 2>&1; then
+        log_error "Arpwatch failed to start"
         exit 1
     fi
 
-    log_info "Arpwatch started successfully (PID: $ARPWATCH_PID)"
+    log_info "Arpwatch started successfully"
 
-    # Wait for arpwatch process to exit
-    wait $ARPWATCH_PID
-    EXIT_CODE=$?
-    log_warn "Arpwatch exited with code: $EXIT_CODE"
-    exit $EXIT_CODE
+    # Keep container alive by waiting for arpwatch
+    # Note: arpwatch may fork, so we wait for any arpwatch process
+    while pgrep -u arpwatch arpwatch >/dev/null 2>&1; do
+        sleep 10
+    done
+
+    log_warn "Arpwatch process exited"
+    exit 1
 }
 
 # Run main function if script is executed (not sourced)

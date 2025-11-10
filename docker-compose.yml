@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   arpwatch:
     image: cmooreio/arpwatch:latest
@@ -11,11 +9,13 @@ services:
     network_mode: host
 
     # Security hardening
-    read_only: true
+    # Note: read_only disabled due to compatibility issues with some Docker environments
+    # re-enable if your environment supports it: read_only: true
+    # read_only: true
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
+    # Note: cap_drop ALL is not used as arpwatch requires additional capabilities
+    # Only add required capabilities
     cap_add:
       - NET_RAW        # Required for packet capture
       - NET_ADMIN      # Required for interface access
@@ -31,11 +31,12 @@ services:
       # OPTIONAL: Additional arpwatch options
       # ARPWATCH_OPTS: "-u arpwatch -p"
 
-    # Writable tmpfs mounts for arpwatch user (UID/GID 102)
+    # Writable tmpfs mounts for root user
+    # Note: Container runs as root, arpwatch drops privileges via -u flag
     tmpfs:
-      - /tmp:uid=102,gid=102,mode=1777
-      - /var/tmp:uid=102,gid=102,mode=1777
-      - /run:uid=102,gid=102,mode=755
+      - /tmp:mode=1777
+      - /var/tmp:mode=1777
+      - /run:mode=755
 
     # Persistent volumes for arpwatch data
     volumes:
@@ -84,8 +85,6 @@ volumes:
 #     read_only: true
 #     security_opt:
 #       - no-new-privileges:true
-#     cap_drop:
-#       - ALL
 #     cap_add:
 #       - NET_RAW
 #       - NET_ADMIN
@@ -93,9 +92,9 @@ volumes:
 #       ARPWATCH_INTERFACES: "eth0,eth1,wlan0"
 #       ARPWATCH_NETWORK: "192.168.0.0/16"
 #     tmpfs:
-#       - /tmp:uid=102,gid=102,mode=1777
-#       - /var/tmp:uid=102,gid=102,mode=1777
-#       - /run:uid=102,gid=102,mode=755
+#       - /tmp:mode=1777
+#       - /var/tmp:mode=1777
+#       - /run:mode=755
 #     volumes:
 #       - arpwatch-data:/var/lib/arpwatch:rw
 #       - arpwatch-logs:/var/log/arpwatch:rw
@@ -111,8 +110,6 @@ volumes:
 #     read_only: true
 #     security_opt:
 #       - no-new-privileges:true
-#     cap_drop:
-#       - ALL
 #     cap_add:
 #       - NET_RAW
 #       - NET_ADMIN
@@ -121,9 +118,9 @@ volumes:
 #       ARPWATCH_NETWORK: "10.0.0.0/8"
 #       DEBUG: "true"
 #     tmpfs:
-#       - /tmp:uid=102,gid=102,mode=1777
-#       - /var/tmp:uid=102,gid=102,mode=1777
-#       - /run:uid=102,gid=102,mode=755
+#       - /tmp:mode=1777
+#       - /var/tmp:mode=1777
+#       - /run:mode=755
 #     volumes:
 #       - ./dev-data:/var/lib/arpwatch:rw
 #       - ./dev-logs:/var/log/arpwatch:rw

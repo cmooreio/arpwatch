@@ -49,8 +49,10 @@ RUN set -eux; \
     groupadd -r -g 102 arpwatch && \
     useradd -r -u 102 -g arpwatch -s /sbin/nologin -d /var/lib/arpwatch -c "Arpwatch User" arpwatch && \
     # Create required directories with proper permissions
+    # Container runs as root, so directories are owned by root
+    # Arpwatch process drops privileges to arpwatch user via -u flag
     mkdir -p /var/lib/arpwatch /var/log/arpwatch && \
-    chown -R arpwatch:arpwatch /var/lib/arpwatch /var/log/arpwatch && \
+    chown -R root:root /var/lib/arpwatch /var/log/arpwatch && \
     chmod 755 /var/lib/arpwatch /var/log/arpwatch && \
     # Clean up apt cache to reduce image size
     apt-get clean && \
@@ -63,8 +65,9 @@ COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
     chown root:root /usr/local/bin/docker-entrypoint.sh
 
-# Switch to non-root user
-USER arpwatch:arpwatch
+# Note: Container runs as root because arpwatch needs root to open raw sockets
+# Arpwatch will drop privileges to arpwatch user via -u flag in entrypoint
+# This is the recommended approach for arpwatch in containers
 
 # Working directory
 WORKDIR /var/lib/arpwatch
