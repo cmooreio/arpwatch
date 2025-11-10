@@ -81,8 +81,8 @@ build_arpwatch_args() {
     fi
 
     # Run in foreground without daemonizing
-    # -N prevents daemonization (required for containers)
-    args+=("-N")
+    # -d enables debug mode and prevents daemonization (required for containers)
+    args+=("-d")
 
     # Drop privileges to arpwatch user after opening network interface
     # This is required because we run as root to open raw sockets
