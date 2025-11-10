@@ -10,7 +10,8 @@ ARG VCS_REF
 # These can be overridden at runtime via docker run -e or docker-compose
 # Note: ARPWATCH_INTERFACES must be set at runtime (no default)
 # This image is designed for logs-only (no email functionality)
-ENV ARPWATCH_OPTS="-u arpwatch -p" \
+# Note: -u flag is not needed as we already run as arpwatch user
+ENV ARPWATCH_OPTS="" \
     ARPWATCH_NETWORK="" \
     ARPWATCH_DATA_DIR="/var/lib/arpwatch"
 

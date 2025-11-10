@@ -272,17 +272,19 @@ environment:
 
 ## Troubleshooting
 
-### Container won't start
+### Container won't start / Arpwatch exits immediately
 - Check ARPWATCH_INTERFACES is set
 - Verify interfaces exist with `ip link show`
 - Ensure NET_RAW and NET_ADMIN capabilities are added
 - Check host network mode is enabled
+- **Docker Desktop**: Arpwatch requires low-level network access that may not work on Docker Desktop (macOS/Windows). Deploy on native Linux for production.
 
 ### No ARP data captured
 - Verify interfaces are up: `ip link show`
 - Check container has required capabilities
 - Verify network mode is set to host
 - Review logs: `docker logs <container>`
+- Ensure running on native Linux (not Docker Desktop)
 
 ### Permission errors
 - Verify tmpfs mounts have `uid=102,gid=102`

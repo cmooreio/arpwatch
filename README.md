@@ -152,9 +152,19 @@ This image implements multiple security best practices:
 
 ## Requirements
 
+- **Platform**: Linux host with direct hardware access (native Linux, not Docker Desktop)
 - **Network Mode**: Must use host network mode (`--net=host`) to access network interfaces
 - **Capabilities**: Requires NET_RAW and NET_ADMIN for packet capture
 - **Interfaces**: At least one network interface must be specified via ARPWATCH_INTERFACES
+
+### Docker Desktop Limitations
+
+**Important**: This image requires direct access to network interfaces for packet capture. **Docker Desktop (macOS/Windows) has limited support** for low-level network operations and arpwatch may not function correctly.
+
+For production use, deploy on:
+- Native Linux hosts
+- Linux VMs with direct network access
+- Kubernetes clusters on Linux nodes
 
 ## Data Persistence
 

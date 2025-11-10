@@ -5,8 +5,9 @@ set -e
 # Handles configuration and startup of arpwatch service
 
 # Default values (ARPWATCH_INTERFACES has no default - must be set by user)
+# Note: We don't use -u flag since container already runs as arpwatch user
 ARPWATCH_INTERFACES="${ARPWATCH_INTERFACES:-}"
-ARPWATCH_OPTS="${ARPWATCH_OPTS:--u arpwatch -p}"
+ARPWATCH_OPTS="${ARPWATCH_OPTS:-}"
 ARPWATCH_DATA_DIR="${ARPWATCH_DATA_DIR:-/var/lib/arpwatch}"
 
 # Color output for logging
@@ -64,8 +65,9 @@ build_arpwatch_args() {
         args+=("${OPTS[@]}")
     fi
 
-    # Run in foreground (don't daemonize)
-    args+=("-N")
+    # Run in foreground with debug output
+    # -d enables debug mode, -N prevents daemonization
+    args+=("-d" "-N")
 
     echo "${args[@]}"
 }
@@ -100,9 +102,32 @@ main() {
     # Log the full command
     log_info "Executing: arpwatch ${arpwatch_args[*]}"
 
-    # Execute arpwatch
+    # Execute arpwatch with proper error handling
     # shellcheck disable=SC2068
-    exec arpwatch ${arpwatch_args[@]}
+    arpwatch ${arpwatch_args[@]} &
+    ARPWATCH_PID=$!
+
+    # Wait for arpwatch to initialize
+    sleep 1
+
+    # Check if arpwatch is still running
+    if ! kill -0 $ARPWATCH_PID 2>/dev/null; then
+        log_error "Arpwatch failed to start or exited immediately"
+        log_error "This may be due to:"
+        log_error "  - Invalid interface name"
+        log_error "  - Missing required capabilities (NET_RAW, NET_ADMIN)"
+        log_error "  - Network mode not set to 'host'"
+        log_error "  - Running on Docker Desktop (limited packet capture support)"
+        exit 1
+    fi
+
+    log_info "Arpwatch started successfully (PID: $ARPWATCH_PID)"
+
+    # Wait for arpwatch process to exit
+    wait $ARPWATCH_PID
+    EXIT_CODE=$?
+    log_warn "Arpwatch exited with code: $EXIT_CODE"
+    exit $EXIT_CODE
 }
 
 # Run main function if script is executed (not sourced)
